@@ -6,3 +6,7 @@ python-dotenv
 pydantic
 python-multipart
 selenium
+openai==0.28
+requests 
+typing-extensions
+gunicorn
