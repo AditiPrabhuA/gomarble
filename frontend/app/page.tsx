@@ -7,8 +7,6 @@ import URLInput from './components/URLInput';
 import ReviewList from './components/ReviewList';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
-
 export default function Home() {
   const [data, setData] = useState<ReviewResponse | null>(null);
   const [isLoading, setIsLoading] = useState(false);
@@ -20,7 +18,7 @@ export default function Home() {
     try {
       const encodedUrl = encodeURIComponent(url);
       const response = await axios.get<ReviewResponse>(
-        `${API_URL}/api/reviews?page=${encodedUrl}`
+        `http://localhost:8000/api/reviews?page=${encodedUrl}`
       );
       setData(response.data);
     } catch (err) {

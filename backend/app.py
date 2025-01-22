@@ -31,16 +31,14 @@ app = FastAPI(
     description="API for scraping reviews from websites",
     version="1.0.0"
 )
-ALLOWED_ORIGINS = os.getenv('ALLOWED_ORIGINS', 'http://localhost:3000').split(',')
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=ALLOWED_ORIGINS,
+    allow_origins=["http://localhost:3000"],
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-
 # Get OpenAI API key from environment
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 if not OPENAI_API_KEY:
@@ -495,7 +493,7 @@ async def grab_reviews(page) -> List[Dict]:
     """
     
     response = openai.ChatCompletion.create(
-        model="gpt-3.5-turbo",
+        model="gpt-4o-mini",
         messages=[
             {"role": "system", "content": "You're an expert at finding CSS selectors for reviews."},
             {"role": "user", "content": prompt},
@@ -630,18 +628,7 @@ def validate_review(review: dict) -> bool:
 async def scrape_site(url: str, max_count: int = 500) -> Dict:
     """Main function for scraping reviews."""
     async with async_playwright() as p:
-        browser = await p.chromium.launch(
-            headless=True,
-            args=[
-                '--no-sandbox',
-                '--disable-setuid-sandbox',
-                '--disable-dev-shm-usage',
-                '--disable-accelerated-2d-canvas',
-                '--no-first-run',
-                '--no-zygote',
-                '--disable-gpu'
-            ]
-        )
+        browser = await p.chromium.launch(headless=True)
         context = await browser.new_context(
             viewport={'width': 1920, 'height': 1080},
             user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
@@ -656,7 +643,7 @@ async def scrape_site(url: str, max_count: int = 500) -> Dict:
             await page.wait_for_timeout(2000)
             
             curr_page = 1
-            while len(review_list) < max_count and curr_page <= 5:
+            while len(review_list) < max_count and curr_page <= 1: # Only one page for now
                 logger.info(f"Scraping page {curr_page}...")
                 
                 await scroll_and_load(page)
