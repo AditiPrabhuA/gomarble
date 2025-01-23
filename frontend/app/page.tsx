@@ -7,7 +7,7 @@ import URLInput from './components/URLInput';
 import ReviewList from './components/ReviewList';
 import { Alert, AlertTitle, AlertDescription } from '@/components/ui/alert';
 
-const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'https://gomarble-test-455y.onrender.com';
+const BACKEND_URL = process.env.NEXT_PUBLIC_BACKEND_URL || 'http://localhost:8000';
 
 export default function Home() {
   const [data, setData] = useState<ReviewResponse | null>(null);

@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: fastapi-backend
+    env: python
+    plan: free
+    buildCommand: "./backend/start.sh"
+    startCommand: "./backend/start.sh"
+    envVars:
+      - key: PORT
+        value: 8000
