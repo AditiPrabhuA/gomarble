@@ -29,11 +29,8 @@ app = FastAPI(
 
 origins = [
     "http://localhost:3000",    # Next.js development server
-    "http://localhost:8000",    # FastAPI development server
     "http://127.0.0.1:3000",
-    "http://127.0.0.1:8000",
-    "https://gomarble-ai.vercel.app", 
-    "https://*.vercel.app" 
+    "https://gomarble-ai.vercel.app"
 ]
 
 app.add_middleware(
