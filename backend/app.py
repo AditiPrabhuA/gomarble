@@ -1,11 +1,8 @@
 from fastapi import FastAPI, HTTPException, Query
-from fastapi.responses import JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
-import asyncio
 from urllib.parse import unquote
 from playwright.async_api import async_playwright
-import json
+
 import time
 from typing import Dict, List, Optional
 import re
@@ -15,7 +12,6 @@ import os
 from dotenv import load_dotenv
 from pydantic import BaseModel
 
-# Load environment variables
 load_dotenv()
 
 # Configure logging
@@ -25,37 +21,42 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-# Initialize FastAPI app
 app = FastAPI(
     title="AI Review Scraper",
     description="API for scraping reviews from websites",
     version="1.0.0"
 )
 
+origins = [
+    "http://localhost:3000",    # Next.js development server
+    "http://localhost:8000",    # FastAPI development server
+    "http://127.0.0.1:3000",
+    "http://127.0.0.1:8000",
+    "https://gomarble-app.vercel.app", 
+    "https://*.vercel.app" 
+]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-# Get OpenAI API key from environment
 OPENAI_API_KEY = os.getenv('OPENAI_API_KEY')
 if not OPENAI_API_KEY:
     raise EnvironmentError("OpenAI API key not found in environment variables")
 
 openai.api_key = OPENAI_API_KEY
-
-# Update the Review model to match frontend expectations
 class Review(BaseModel):
     title: str
-    body: str  # This will contain the review text
-    rating: Optional[float]  # This matches the frontend's rating field
-    reviewer: str  # This matches the frontend's reviewer field
+    body: str  
+    rating: Optional[float] 
+    reviewer: str  
 
 class ReviewResponse(BaseModel):
     reviews_count: int
-    reviews: List[Review]  # Frontend expects this to be "reviews" not "review_list"
+    reviews: List[Review] 
     pages_with_unique_reviews: int
     url: str
     scrape_date: str
@@ -116,7 +117,7 @@ async def scroll_and_load(page):
 
         # Scroll multiple times to trigger lazy loading
         current_height = 0
-        for _ in range(5):  # Increased from 3 to 5 scrolls
+        for _ in range(5):
             try:
                 await page.evaluate('''() => {
                     window.scrollTo({
@@ -124,7 +125,7 @@ async def scroll_and_load(page):
                         behavior: 'smooth'
                     });
                 }''')
-                await page.wait_for_timeout(2000)  # Reduced from 3000 to 2000ms
+                await page.wait_for_timeout(2000)  
                 
                 new_height = await page.evaluate('document.body.scrollHeight')
                 if new_height == current_height:
@@ -139,7 +140,7 @@ async def scroll_and_load(page):
             'button:text-is("Show More")',
             'button:text-is("Load More")',
             'button:text-is("More Reviews")',
-            '.jdgm-rev-widg__load-more-btn',  # Judge.me specific
+            '.jdgm-rev-widg__load-more-btn'
             '[data-load-more-reviews]',
             '[class*="load-more"]',
             '[class*="show-more"]',
@@ -628,68 +629,169 @@ def validate_review(review: dict) -> bool:
 async def scrape_site(url: str, max_count: int = 500) -> Dict:
     """Main function for scraping reviews."""
     async with async_playwright() as p:
-        browser = await p.chromium.launch(headless=True)
-        context = await browser.new_context(
-            viewport={'width': 1920, 'height': 1080},
-            user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
-        )
-        page = await context.new_page()
-        review_list = []
-        successful_pages = 0
-        
+        browser_args = [
+            '--disable-gpu',
+            '--disable-dev-shm-usage',
+            '--disable-setuid-sandbox',
+            '--no-sandbox',
+            '--single-process',
+            '--no-zygote',
+            '--disable-web-security',
+            '--disable-features=IsolateOrigins,site-per-process',
+            '--ignore-certificate-errors',
+            '--ignore-certificate-errors-spki-list',
+            '--enable-features=NetworkService'
+        ]
+
         try:
-            logger.info(f"Loading page: {url}")
-            await page.goto(url, wait_until='domcontentloaded')
-            await page.wait_for_timeout(2000)
-            
-            curr_page = 1
-            while len(review_list) < max_count and curr_page <= 1: # Only one page for now
-                logger.info(f"Scraping page {curr_page}...")
+            browser = await p.chromium.launch(
+                headless=True,
+                args=browser_args,
+                timeout=60000  
+            )
+
+            context = await browser.new_context(
+                viewport={'width': 1920, 'height': 1080},
+                user_agent='Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+                ignore_https_errors=True,
+                java_script_enabled=True,
+                bypass_csp=True
+            )
+
+            # Set default navigation timeout for all operations
+            context.set_default_navigation_timeout(60000)
+            context.set_default_timeout(60000)
+
+            page = await context.new_page()
+            review_list = []
+            successful_pages = 0
+
+            try:
+                logger.info(f"Loading page: {url}")
                 
-                await scroll_and_load(page)
-                new_reviews = await grab_reviews(page)
-                
-                # Validate new reviews
-                valid_reviews = [review for review in new_reviews if validate_review(review)]
-                logger.info(f"Found {len(valid_reviews)} valid reviews out of {len(new_reviews)} total")
-                
-                if valid_reviews:
-                    existing_texts = set(r['body'] for r in review_list)
-                    unique_reviews = [r for r in valid_reviews if r['body'] not in existing_texts]
+                # First attempt with networkidle
+                try:
+                    response = await page.goto(
+                        url,
+                        wait_until='networkidle',
+                        timeout=120000
+                    )
+                    if not response:
+                        raise Exception("No response received from page")
+                    if not response.ok:
+                        raise Exception(f"Page returned status {response.status}")
+                        
+                except Exception as first_error:
+                    logger.warning(f"First load attempt failed: {str(first_error)}")
+                    # Second attempt with domcontentloaded
+                    try:
+                        response = await page.goto(
+                            url,
+                            wait_until='domcontentloaded',
+                            timeout=120000
+                        )
+                        if not response or not response.ok:
+                            raise Exception("Failed to load page on second attempt")
+                    except Exception as second_error:
+                        logger.error(f"Second load attempt failed: {str(second_error)}")
+                        # Final attempt with load event
+                        response = await page.goto(
+                            url,
+                            wait_until='load',
+                            timeout=120000
+                        )
+
+                # Additional wait and checks
+                try:
+                    await page.wait_for_load_state('domcontentloaded', timeout=30000)
+                    await page.wait_for_load_state('networkidle', timeout=30000)
+                except Exception as wait_error:
+                    logger.warning(f"Additional wait states failed: {str(wait_error)}")
+
+                # Verify page content
+                content = await page.content()
+                if not content or len(content) < 100:
+                    raise Exception("Page content appears empty or too short")
+
+                curr_page = 1
+                while len(review_list) < max_count and curr_page <= 5: #change this to get more reviews
+                    logger.info(f"Scraping page {curr_page}...")
                     
-                    if unique_reviews:
-                        successful_pages += 1
-                        logger.info(f"Added {len(unique_reviews)} new unique reviews from page {curr_page}")
-                        review_list.extend(unique_reviews)
+                    await scroll_and_load(page)
+                    new_reviews = await grab_reviews(page)
+                    
+                    valid_reviews = [review for review in new_reviews if validate_review(review)]
+                    logger.info(f"Found {len(valid_reviews)} valid reviews out of {len(new_reviews)} total")
+                    
+                    if valid_reviews:
+                        existing_texts = set(r['body'] for r in review_list)
+                        unique_reviews = [r for r in valid_reviews if r['body'] not in existing_texts]
+                        
+                        if unique_reviews:
+                            successful_pages += 1
+                            logger.info(f"Added {len(unique_reviews)} new unique reviews")
+                            review_list.extend(unique_reviews)
+                        else:
+                            logger.info("No new unique reviews found")
+                            break
                     else:
-                        logger.info("No new unique reviews found. Stopping.")
+                        logger.info("No valid reviews found on current page")
+                        # Try one more time before giving up
+                        await page.reload(timeout=60000, wait_until='networkidle')
+                        await scroll_and_load(page)
+                        new_reviews = await grab_reviews(page)
+                        valid_reviews = [review for review in new_reviews if validate_review(review)]
+                        if valid_reviews:
+                            review_list.extend(valid_reviews)
+                            successful_pages += 1
                         break
-                else:
-                    logger.info("No valid reviews found on current page. Stopping.")
-                    break
 
-                if len(review_list) < max_count:
-                    has_next = await handle_pagination(page, curr_page)
-                    if not has_next:
+                    if len(review_list) < max_count:
+                        has_next = await handle_pagination(page, curr_page)
+                        if not has_next:
+                            break
+                        curr_page += 1
+                    else:
                         break
-                    curr_page += 1
-                else:
-                    break
 
-            result = {
-                "reviews_count": len(review_list),
-                "reviews": review_list,
-                "pages_with_unique_reviews": successful_pages,
-                "url": url,
-                "scrape_date": time.strftime("%Y-%m-%d")
-            }
-            
-            logger.info(f"Final result: {len(review_list)} reviews from {successful_pages} pages")
-            return result
+                # Return results even if we got less than expected
+                result = {
+                    "reviews_count": len(review_list),
+                    "reviews": review_list,
+                    "pages_with_unique_reviews": successful_pages,
+                    "url": url,
+                    "scrape_date": time.strftime("%Y-%m-%d")
+                }
+                
+                logger.info(f"Scraping completed: {len(review_list)} reviews from {successful_pages} pages")
+                return result
+                
+            except Exception as page_error:
+                logger.error(f"Error during page operations: {str(page_error)}")
+                if review_list:
+                    logger.info("Returning partial results due to error")
+                    return {
+                        "reviews_count": len(review_list),
+                        "reviews": review_list,
+                        "pages_with_unique_reviews": successful_pages,
+                        "url": url,
+                        "scrape_date": time.strftime("%Y-%m-%d")
+                    }
+                raise
+                
+            finally:
+                await page.close()
+                
+        except Exception as browser_error:
+            logger.error(f"Browser error: {str(browser_error)}")
+            raise
             
         finally:
-            await context.close()
-            await browser.close()
+            try:
+                await context.close()
+                await browser.close()
+            except Exception as close_error:
+                logger.error(f"Error closing browser: {str(close_error)}")
 
 
 @app.get("/api/reviews", response_model=ReviewResponse)
@@ -745,13 +847,7 @@ async def get_reviews(
             status_code=500,
             detail=str(e)
         )
-# Health check endpoint
+
 @app.get("/api/health")
 async def health_check():
     return {"status": "healthy"}
-
-@app.get("/api/debug-reviews")
-async def debug_reviews(page: str = Query(...)):
-    url = unquote(page)
-    result = await scrape_site(url)
-    return {"raw_result": result}
