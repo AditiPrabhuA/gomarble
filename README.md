@@ -2,6 +2,9 @@
 
 An application that automatically scrapes and extracts reviews from e-commerce product pages using AI for dynamic CSS identification. The system comprises a FastAPI backend for web scraping and a Next.js frontend for visualization.
 
+## Demo
+https://github.com/user-attachments/assets/e42ff3ed-2942-4987-bf86-9b3cae8bcb8d
+
 ## Architecture
 
 ```mermaid
